@@ -100,7 +100,7 @@ function record() {
 
       videoPlayer.pause();
       videoPlayer.muted = true;
-      videoPlayer.src = window.URL.createObjectURL(stream);
+      videoPlayer.src = URL.createObjectURL(stream);
       videoPlayer.play();
 
       recorderStream = stream;
@@ -183,16 +183,14 @@ function stopRecording() {
   }, recordEndTimeOut);
 }
 
-
 function previewRecordings(videoUrl, audioUrl) {
   cancelAnalyserUpdates();
   // @TODO do the same for audio element if !isFirefox
   videoPlayer.pause();
   videoPlayer.muted = false;
-  videoPlayer.srcObject = null;
   videoPlayer.src = videoUrl;
   videoPlayer.load();
-  if (!isFirefox) {
+  if (!isFirefox && audioUrl) {
     audioPlayer.pause();
     audioPlayer.src = audioUrl;
     audioPlayer.load();
@@ -242,7 +240,7 @@ function xhr(url, data, progress, callback) {
       console.log('xhr end with success');
       resetData();
       // use reload or generate route...
-      location.reload();
+      //location.reload();
 
     } else if (request.status === 500) {
       console.log('xhr error');

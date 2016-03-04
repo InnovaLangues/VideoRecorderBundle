@@ -74,10 +74,12 @@ class VideoRecorderManager
           $fs->mkdir($targetDir);
         }
 
-        //$doEncode = isset($postData['convert']) && $postData['convert'] == true;
+        // encode the given blob(s) in any case.
+        // -> allow the video slider to be effective
+        // -> lighter file
+        // -> allow the vidéo to be replayed without reloading the web page
         $isFirefox = $postData['nav'] === 'firefox';
         $extension = 'webm';
-        $encodingExt = 'webm';
         $mimeType = 'video/webm';
 
         if (!$this->validateParams($postData, $video, $isFirefox, $audio)) {
@@ -88,22 +90,24 @@ class VideoRecorderManager
         // the filename that will be in database (human readable)
         $fileBaseName = $postData['fileName'];
         $uniqueBaseName = $this->claroUtils->generateGuid();
-        $fileName = $uniqueBaseName . '.webm';
+        $finalFileName = $uniqueBaseName . '.' . $extension;
 
         $baseHashName = $this->getBaseFileHashName($uniqueBaseName, $workspace);
-        $hashName = $baseHashName . '.webm';
+        $hashName = $baseHashName . '.' . $extension;
+        // file size after encoding
+        $size = 0;
 
-        // file size @ToBe overriden if doEncode = true
-        $size = $video->getSize();
         // marge audio and video in a single webm file for webkit based user agent
         if (!$isFirefox) {
-            // the filename after encoding
-            $encodedName = $uniqueBaseName . '.webm';
+
+            $tempAudioFileName = $fileBaseName.'.wav';
+            $tempVideoFileName = $fileBaseName . '.' . $extension;
+
             // upload original file in temp upload (ie web/uploads) dir
-            $video->move($this->tempUploadDir, $fileBaseName.'.webm');
-            $audio->move($this->tempUploadDir, $fileBaseName.'.wav');
+            $video->move($this->tempUploadDir, $tempVideoFileName);
+            $audio->move($this->tempUploadDir, $tempAudioFileName);
             // merge temp files into one webm file
-            $cmd = 'avconv -i '. $this->tempUploadDir . DIRECTORY_SEPARATOR . $fileBaseName.'.wav' .' -i ' . $this->tempUploadDir . DIRECTORY_SEPARATOR . $fileBaseName.'.webm'.' -map 0:0 -map 1:0 '. $this->tempUploadDir . DIRECTORY_SEPARATOR . $encodedName;
+            $cmd = 'avconv -i '. $this->tempUploadDir . DIRECTORY_SEPARATOR . $tempAudioFileName . ' -i ' . $this->tempUploadDir . DIRECTORY_SEPARATOR . $tempVideoFileName . ' -map 0:1 -map 1:0 '. $this->tempUploadDir . DIRECTORY_SEPARATOR . $finalFileName;
 
             $output;
             $returnVar;
@@ -116,18 +120,40 @@ class VideoRecorderManager
             }
 
             // copy the encoded file to user workspace directory
-            $fs->copy($this->tempUploadDir . DIRECTORY_SEPARATOR . $encodedName, $targetDir . DIRECTORY_SEPARATOR . $encodedName);
+            $fs->copy($this->tempUploadDir . DIRECTORY_SEPARATOR . $finalFileName, $targetDir . DIRECTORY_SEPARATOR . $finalFileName);
             // get encoded file size...
-            $sFile = new sFile($targetDir . DIRECTORY_SEPARATOR . $encodedName);
+            $sFile = new sFile($targetDir . DIRECTORY_SEPARATOR . $finalFileName);
             $size = $sFile->getSize();
             // remove temp encoded file
-            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $encodedName);
+            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $finalFileName);
             // remove original non encoded file from temp dir
-            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $fileBaseName.'.webm');
-            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $fileBaseName.'.wav');
+            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $tempVideoFileName);
+            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $tempAudioFileName);
 
         } else {
-            $video->move($targetDir, $fileName);
+
+            $tempVideoFileName = $fileBaseName . '.' . $extension;
+            $video->move($this->tempUploadDir, $tempVideoFileName);
+            // reencode source webm file... into... webm
+            $cmd = 'avconv -i '. $this->tempUploadDir . DIRECTORY_SEPARATOR . $tempVideoFileName . ' -c:v libvpx -crf 30 -b:v 512k -c:a libvorbis -ac 1 ' . $this->tempUploadDir . DIRECTORY_SEPARATOR . $finalFileName;
+
+            $output;
+            $returnVar;
+            exec($cmd, $output, $returnVar);
+
+            // cmd error
+            if ($returnVar !== 0) {
+                array_push($errors, 'File conversion failed with command ' . $cmd . ' and returned ' . $returnVar);
+                return array('file' => null, 'errors' => $errors);
+            }
+
+            // copy the encoded file to user workspace directory
+            $fs->copy($this->tempUploadDir . DIRECTORY_SEPARATOR . $finalFileName, $targetDir . DIRECTORY_SEPARATOR . $finalFileName);
+            // get encoded file size...
+            $sFile = new sFile($targetDir . DIRECTORY_SEPARATOR . $finalFileName);
+            $size = $sFile->getSize();
+            // remove temp encoded file
+            @unlink($this->tempUploadDir . DIRECTORY_SEPARATOR . $tempVideoFileName);
         }
 
         $file = new File();
